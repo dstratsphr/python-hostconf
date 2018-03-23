@@ -51,7 +51,7 @@ class Configure(object):
         # create a log file
         self.log = open(os.path.join(self.tdir, 'config_'+name+'.log'), 'w')
 
-        print("TMPDIR:", self.tdir)
+        # initialize our  indexer
         self.conf_idx = 0
 
         # None - init, False - during, True - Done
@@ -169,15 +169,17 @@ class Configure(object):
             # chop it up
             parts = line.split()
             if parts[0] == '#' and parts[1] == 'undef':
+                pptag = ''.join( parts[:1])
                 tag = parts[2]
             else:
+                pptag = parts[0]
                 tag = parts[1]
 
             # handle easy undefs
             if tag in self.config:
                 fd.write('#define {} 1\n'.format(tag))
             else:
-                fd.write(line)
+                fd.write('/* ' + pptag + ' ' + tag + ' */\n')
             continue
 
         # mop up
@@ -188,20 +190,34 @@ class Configure(object):
     def spawn(self, cmd_args):
 
         # run it as a subprocess to collect the output
-        rv = subprocess.run(cmd_args,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE)
+        try:
+            self.log.write(' '.join(cmd_args) + os.linesep)
+            rv = subprocess.run(cmd_args,
+                                timeout=5,
+                                check=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        except subprocess.TimeoutExpired as te_err:
+            self.log.write(str(te_err))
+            raise DistutilsExecError("command %r timed-out." % cmd_args)
+        except subprocess.CalledProcessError as cp_err:
+            self.log.write(str(cp_err))
+            raise DistutilsExecError(cp_err)
 
+        # success
+        return
+        
         # helpful for logging...
-        self.log.write(' '.join(cmd_args) + '\n')
-        self.log.write(str(rv.stdout))
+        #self.log.write(str(rv.stdout))
 
         # success...
-        if rv.returncode == 0:
-            return
+        #if rv.returncode == 0:
+        #    return
 
         # bad news...
-        self.log.write(str(rv.stderr))
+        #self.log.write(str(rv.stderr))
+        #raise DistutilsExecError("command %r failed with exit status %d"
+        #                         % (cmd_args, rv.returncode))
         
 
     def _conftest_file(self,
@@ -309,8 +325,53 @@ class Configure(object):
         #BLDLIBRARY = "-lpython3.5m"
 	#BLDSHARED = "x86_64-linux-gnu-gcc -pthread -shared -Wl,-O1 -Wl,-Bsymbolic-functions -Wl,-Bsymbolic-functions -Wl,-z,relro"
 
+    def _check_tool(self, tool, tool_args=None):
+        rv = None
         
+        if tool_args is None:
+            tool_args = ['--garbage']
         
+        try:
+            rv = subprocess.run([tool]+tool_args,
+                                timeout=1,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        except FileNotFoundError as fnfe_err:
+            # tool is not available
+            return False, rv
+        except PermissionError as p_err:
+            # found something but it is not executable
+            return False, rv
+        except subprocess.TimeoutExpired as te_err:
+            # ran it and it wedged
+            return False, rv
+        except subprocess.CalledProcessError as cp_err:
+            # ran it and it failed, but got an exit code
+            return True, rv
+
+        # all good
+        return True, rv
+
+    def check_tool(self, tool, tool_args=None, verbose=True):
+        """Try to locate a tool"""
+
+        # setup the message
+        if verbose:
+            print("checking for '{}' tool ... ".format(tool), end='')
+
+        # snoop it
+        ok,rec = self._check_tool(tool=tool, tool_args=tool_args)
+
+        if ok:
+            if verbose:
+                print(tool)
+            return True
+
+        if verbose:
+            print('unavailable')
+        return False
+            
+
     def check_headers(self, headers, includes=None,
                       include_dirs=None, macros=None):
         """Equivalent to AC_CHECK_HEADERS"""
@@ -338,6 +399,7 @@ class Configure(object):
         # determine the tags
         cache_tag = self._cache_tag('ac_cv_header_', header)
         config_tag = self._config_tag('HAVE_', header)
+        cache_loc = 'cached'
         
         # check the sysconfig
         rv = sysconfig.get_config_var(config_tag)
@@ -346,10 +408,11 @@ class Configure(object):
             self.includes.append(header)
             self.config[config_tag] = rv
             self.cache[cache_tag] = 'yes'
+            cache_loc = 'sysconfig'
 
         # cache check
         if cache_tag in self.cache and self.cache[cache_tag] == 'yes':
-            print(self.cache[cache_tag] + ' (cached)')
+            print(self.cache[cache_tag] + ' ({})'.format(cache_loc))
             return True
 
         # assume the worst
@@ -521,7 +584,7 @@ class Configure(object):
         print('checking for {} in {} ... '.format(decl, header), end='')
 
         # cache check
-        cache_tag = self._cache_tag('ac_cv_func_', funcname)
+        cache_tag = self._cache_tag('ac_cv_func_', decl)
         if cache_tag in self.cache and self.cache[cache_tag] == 'yes':
             print(self.cache[cache_tag] + ' (cached)')
             return True
@@ -708,6 +771,8 @@ if __name__ == '__main__':
     oks = cf.check_headers(['stdio.h', 'stdlib.h', 'string.h'])
 
     rv = cf.check_header('Python.h')
+
+    rv = cf.check_header('Bork.h')
 
     rv = cf.check_decl('EL_EDITOR', 'histedit.h')
 
