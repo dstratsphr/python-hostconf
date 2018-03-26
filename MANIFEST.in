@@ -1,0 +1,3 @@
+include hostconf/*.py
+include *.py setup.cfg CHANGES.rst LICENSE README.rst
+prune hostconf/__pycache__
