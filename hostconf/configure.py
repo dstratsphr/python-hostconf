@@ -66,8 +66,6 @@ if not hasattr(subprocess, 'run'):
     subprocess.run = run
 
 
-from distutils import log
-
 class ConfigureError(Exception):
     """Something in the configuration is not right."""
     pass
@@ -87,12 +85,14 @@ class Configure(object):
 
         self.name = name
         self.debug = debug
+        self.log = None
 
         if tmpdir is None:
             self.tdir = tempfile.mkdtemp(prefix=name+'_')
         else:
             self.tdir = os.path.join(tmpdir, name)
-            os.makedirs(self.tdir)
+            if not os.path.isdir(self.tdir):
+                os.makedirs(self.tdir)
 
         # create a log file
         self.log = open(os.path.join(self.tdir, 'config_'+name+'.log'), 'w')
@@ -111,8 +111,6 @@ class Configure(object):
 
         # add the Python stuff
         self.compiler.include_dirs += [sysconfig.get_config_var('INCLUDEPY')]
-
-        #log.set_threshold(log.WARN)
         
         # hook in my spawner
         self._spawn = self.compiler.spawn
@@ -252,19 +250,20 @@ class Configure(object):
         except subprocess.TimeoutExpired as te_err:
             self.log.write("process timeout ({:d}s) error".format(te_err.timeout) + os.linesep)
             self.log.write("stdout output:" + os.linesep)
-            self.log.write(str(te_err.stdout))
-            self.log.write("stderr output:" + os.linesep)
-            self.log.write(str(te_err.stderr))
+            self.log.write(str(te_err.output))
+            if hasattr(cp_err, 'stderr'):
+                self.log.write("stderr output:" + os.linesep)
+                self.log.write(str(te_err.stderr))
             raise DistutilsExecError("command %r timed-out." % cmd_args)
 
         except subprocess.CalledProcessError as cp_err:
             self.log.write("process error: ({:d})".format(cp_err.returncode) + os.linesep)
-            if cp_err.stdout != b'':
-                errstrs = cp_err.stdout.decode('utf-8').split('\n')
+            if cp_err.output != b'':
+                errstrs = cp_err.output.decode('utf-8').split('\n')
                 self.log.write("stdout output:" + os.linesep)
                 for es in errstrs:
                     self.log.write(es + os.linesep)
-            if cp_err.stderr != b'':
+            if hasattr(cp_err, 'stderr') and cp_err.stderr != b'':
                 errstrs = cp_err.stderr.decode('utf-8').split('\n')
                 self.log.write("stderr output:" + os.linesep)
                 for es in errstrs:

@@ -2,14 +2,16 @@
 #  Handy targets to make things work
 #
 
+PYTHON?=/usr/bin/python3
+
 all: dist
 
-README.rst:
-	pandoc --from=markdown --to=rst --output README.rst README.md
+README:
+	pandoc --from=markdown --to=rst --output README README.md
 
 clean:
 	@rm -rf build
-	@rm -f *~ README.rst MANIFEST
+	@rm -f *~ README MANIFEST
 
 distclean: clean
 	@find . -type d -name __pycache__ | xargs /bin/rm -rf
@@ -21,7 +23,7 @@ venv:
 	venv/bin/pip install --upgrade pip
 	venv/bin/pip install twine
 
-dist: README.rst
+dist: venv README
 	venv/bin/python3 setup.py sdist
 
 clean-venv:
