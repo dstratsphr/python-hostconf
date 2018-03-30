@@ -1,3 +1,9 @@
+Version 0.1.1
+-------------
+
+Minor output fix to improve the user understanding of check_lib_link
+to clearly show what library combinations are being tried.
+
 Version 0.1.0
 -------------
 

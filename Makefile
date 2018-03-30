@@ -28,3 +28,15 @@ dist: venv README
 
 clean-venv:
 	@find venv/lib/python3.?/site-packages/ -name '*hostconf*' | xargs /bin/rm -rf
+
+upload: dist
+	venv/bin/twine upload dist/hostconf*.tar.gz
+
+test-upload: dist
+	venv/bin/twine upload --repository-url https://test.pypi.org/legacy/ dist/hostconf*.tar.gz
+
+#
+#  PIP install from test-site:
+#
+#    pip install --index-url https://test.pypi.org/simple/ hostconf
+#
