@@ -662,7 +662,8 @@ class Configure(object):
         return True
 
     def check_lib(self, funcname, library=None, includes=None, 
-                  include_dirs=None, libraries=None, library_dirs=None):
+                  include_dirs=None, libraries=None, library_dirs=None,
+                  msg_add_libs=False):
         """Equivalent to AC_CHECK_LIB"""
 
         # hook to be sure we do the std stuff first
@@ -691,7 +692,13 @@ class Configure(object):
             dashl = '-l' + library
             local_libs.insert(0, library)
             libmsg = dashl
-            
+
+        # provide a bit of extra info on the lib linking
+        if msg_add_libs:
+            for exlib in libraries:
+                if exlib != '':
+                    libmsg += ' -l' + exlib
+
         self.check_msg(funcname, item_in=libmsg)
 
         # determine the tags
@@ -783,7 +790,7 @@ class Configure(object):
             # check the library by itself
             if self.check_lib(funcname, library, libraries=[testlib],
                               includes=includes, include_dirs=include_dirs,
-                              library_dirs=library_dirs):
+                              library_dirs=library_dirs, msg_add_libs=True):
                 return [testlib]
 
         # full restore
