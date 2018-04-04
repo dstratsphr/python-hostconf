@@ -1,3 +1,8 @@
+Version 0.1.2
+-------------
+
+Added additional Exception types and coded them to make the Configuration errors more visible when they occur, along with detailing what should be done to fix it.
+
 Version 0.1.1
 -------------
 
