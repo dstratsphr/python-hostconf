@@ -68,7 +68,30 @@ if not hasattr(subprocess, 'run'):
 
 class ConfigureError(Exception):
     """Something in the configuration is not right."""
-    pass
+    def __init__(self, message):
+        msg = os.linesep + os.linesep
+        msg += '*' * 60 + os.linesep
+        msg += message + os.linesep
+        msg += '*' * 60 + os.linesep
+        super().__init__(msg)
+
+class ConfigureSystemLibraryError(ConfigureError):
+    """System libraries do not contain adequat support."""
+
+    def __init__(self, fcn, test_libs):
+        msg  = "Must have '{0}' in one of:".format(fcn) + os.linesep
+        msg += "  " + ', '.join(test_libs) + os.linesep
+        msg += "Please install one of these system libraries on your platform."
+        super().__init__(msg)
+
+class ConfigureSystemHeaderFileError(ConfigureError):
+    """System C-header files are not present"""
+    def __init__(self, headers, selection='one of'):
+        msg  = 'Must have ' + selection + os.linesep
+        msg += '  ' + ', '.join(headers) + os.linesep
+        msg += 'Please install a (development) package containing one.'
+        super().__init__(msg)
+
 
 class Configure(object):
     """Base class for common support aspects of the configuration process."""
@@ -615,7 +638,8 @@ class Configure(object):
         cache_loc = 'cached'
         
         # check the sysconfig
-        rv = sysconfig.get_config_var(config_tag)
+        #rv = sysconfig.get_config_var(config_tag)
+        rv = False
         if rv:
             self.macros.append( (config_tag, 1) )
             self.includes.append(header)
