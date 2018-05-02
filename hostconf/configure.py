@@ -1,23 +1,22 @@
 #!/usr/bin/python3
-#
-#  Tools for emulating a bit of autoconf/configure
-#
+"""
+Tools for emulating autoconf's inspection abilities in pure (ok, almost) python.
 
-import sys
+"""
+
 import os
 import sysconfig
 import tempfile
 import shutil
 import subprocess
-import logging
 
 from pprint import PrettyPrinter
 
-from distutils.errors import *
+from distutils.errors import DistutilsExecError, CompileError, LinkError
 from distutils.ccompiler import new_compiler
 from distutils.sysconfig import customize_compiler
 
-pp = PrettyPrinter(indent=4)
+from config_errors import ConfigureSystemHeaderFileError
 
 #
 #  It turns out that older subprocess modules did not have the 'run'
@@ -26,7 +25,11 @@ pp = PrettyPrinter(indent=4)
 #  calls elsewhere to subprocess.run() don't choke.
 #
 if not hasattr(subprocess, 'run'):
+
     class CompletedProcess(object):
+        """Emulating process class from the future for older pythons
+
+        """
         def __init__(self, args, retcode, stdout, stderr):
             self.args = args
             self.returncode = retcode
@@ -35,14 +38,17 @@ if not hasattr(subprocess, 'run'):
 
         def check_returncode(self):
             if self.returncode:
-                raise CalledProcessError(self.returncode, self.args,
-                                         self.stdout, self.stderr)
-                
+                raise subprocess.CalledProcessError(self.returncode, self.args,
+                                                    self.stdout, self.stderr)
+
+
     def run(*popenargs, input=None, timeout=None, check=False, **kwargs):
+        """Emulating the run routine found in future subprocess modules
+        """
         if input is not None:
             if 'stdin' in kwargs:
-                raise ValueError('stdin and input arguments may not both be used.')
-            kwargs['stdin'] = PIPE
+                raise ValueError('stdin and input args may not both be used.')
+            kwargs['stdin'] = subprocess.PIPE
 
         with subprocess.Popen(*popenargs, **kwargs) as process:
             try:
@@ -50,47 +56,20 @@ if not hasattr(subprocess, 'run'):
             except subprocess.TimeoutExpired:
                 process.kill()
                 stdout, stderr = process.communicate()
-                raise subprocess.TimeoutExpired(process.args, timeout,
-                                                output=stdout, stderr=stderr)
+                raise subprocess.TimeoutExpired(
+                    process.args, timeout, output=stdout, stderr=stderr)
             except:
                 process.kill()
                 process.wait()
                 raise
             retcode = process.poll()
             if check and retcode:
-                raise subprocess.CalledProcessError(retcode, process.args,
-                                                    output=stdout+stderr)
+                raise subprocess.CalledProcessError(
+                    retcode, process.args, output=stdout + stderr)
         return CompletedProcess(process.args, retcode, stdout, stderr)
 
     # basically hack it in
     subprocess.run = run
-
-
-class ConfigureError(Exception):
-    """Something in the configuration is not right."""
-    def __init__(self, message):
-        msg = os.linesep + os.linesep
-        msg += '*' * 60 + os.linesep
-        msg += message + os.linesep
-        msg += '*' * 60 + os.linesep
-        super().__init__(msg)
-
-class ConfigureSystemLibraryError(ConfigureError):
-    """System libraries do not contain adequat support."""
-
-    def __init__(self, fcn, test_libs):
-        msg  = "Must have '{0}' in one of:".format(fcn) + os.linesep
-        msg += "  " + ', '.join(test_libs) + os.linesep
-        msg += "Please install one of these system libraries on your platform."
-        super().__init__(msg)
-
-class ConfigureSystemHeaderFileError(ConfigureError):
-    """System C-header files are not present"""
-    def __init__(self, headers, selection='one of'):
-        msg  = 'Must have ' + selection + os.linesep
-        msg += '  ' + ', '.join(headers) + os.linesep
-        msg += 'Please install a (development) package containing one.'
-        super().__init__(msg)
 
 
 class Configure(object):
@@ -98,27 +77,32 @@ class Configure(object):
 
     cache = {}
     config = {}
-    macros = []         # list of tuples (MACRO, value)
+    macros = []  # list of tuples (MACRO, value)
     includes = []
     include_dirs = []
     libraries = []
-    
-    def __init__(self, name='hostconf', compiler=None, tmpdir=None,
-                 verbose=0, dry_run=0, debug=False):
+
+    def __init__(self,
+                 name='hostconf',
+                 compiler=None,
+                 tmpdir=None,
+                 verbose=0,
+                 dry_run=0,
+                 debug=False):
 
         self.name = name
         self.debug = debug
         self.log = None
 
         if tmpdir is None:
-            self.tdir = tempfile.mkdtemp(prefix=name+'_')
+            self.tdir = tempfile.mkdtemp(prefix=name + '_')
         else:
             self.tdir = os.path.join(tmpdir, name)
             if not os.path.isdir(self.tdir):
                 os.makedirs(self.tdir)
 
         # create a log file
-        self.log = open(os.path.join(self.tdir, 'config_'+name+'.log'), 'w')
+        self.log = open(os.path.join(self.tdir, 'config_' + name + '.log'), 'w')
 
         # initialize our  indexer
         self.conf_idx = 0
@@ -134,7 +118,7 @@ class Configure(object):
 
         # add the Python stuff
         self.compiler.include_dirs += [sysconfig.get_config_var('INCLUDEPY')]
-        
+
         # hook in my spawner
         self._spawn = self.compiler.spawn
         self.compiler.spawn = self.spawn
@@ -142,41 +126,40 @@ class Configure(object):
     def __del__(self):
         if self.log:
             self.log.close()
-        
+
         if not self.debug:
             shutil.rmtree(self.tdir)
 
     def dump(self):
+        ppt = PrettyPrinter(indent=4)
         print("Configure.config:")
-        pp.pprint(self.config)
+        ppt.pprint(self.config)
         print("Configure.cache:")
-        pp.pprint(self.cache)
+        ppt.pprint(self.cache)
         print("Configure.macros:")
-        pp.pprint(self.macros)
+        ppt.pprint(self.macros)
         print("Configure.includes:")
-        pp.pprint(self.includes)
+        ppt.pprint(self.includes)
         print("Configure.include_dirs:")
-        pp.pprint(self.include_dirs)
+        ppt.pprint(self.include_dirs)
         print("Configure.libraries:")
-        pp.pprint(self.libraries)
-
+        ppt.pprint(self.libraries)
 
     @staticmethod
     def _cache_tag(prefix, tag):
         """Create a cache tag name"""
         tag = tag.replace('/', '_')
-        tag = tag.replace('.','_')
-        tag = tag.replace(' ','_')
+        tag = tag.replace('.', '_')
+        tag = tag.replace(' ', '_')
         return prefix + tag
-    
+
     @staticmethod
     def _config_tag(prefix, tag):
         """Create a config tag name"""
         tag = tag.replace('.', '_')
         tag = tag.replace('/', '_')
-        tag = tag.replace(' ','_')
+        tag = tag.replace(' ', '_')
         return prefix + tag.upper()
-
 
     def generate_config_log(self, config_log):
         """Somewhat puke out a similar log file to the config.log"""
@@ -188,8 +171,8 @@ class Configure(object):
         fd.write('## ---------------- ##\n')
         fd.write('\n')
 
-        for t in sorted(self.cache.keys()):
-            fd.write('{}={}\n'.format(t,self.cache[t]))
+        for key in sorted(self.cache.keys()):
+            fd.write('{}={}\n'.format(key, self.cache[key]))
 
         fd.write('\n')
         fd.write('## ----------------- ##\n')
@@ -197,7 +180,7 @@ class Configure(object):
         fd.write('## ----------------- ##\n')
         fd.write('\n')
 
-        fd.write("LIBS='{}'\n".format( ' -l'.join(self.libraries)))
+        fd.write("LIBS='{}'\n".format(' -l'.join(self.libraries)))
 
         fd.write('\n')
         fd.write('## ----------- ##\n')
@@ -205,30 +188,31 @@ class Configure(object):
         fd.write('## ----------- ##\n')
         fd.write('\n')
 
-        for m,v in self.macros:
-            if v is None:
-                v = 1
-            fd.write('#define {} {}\n'.format(m,v))
+        for mname, value in self.macros:
+            if value is None:
+                value = 1
+            fd.write('#define {} {}\n'.format(mname, value))
 
         # done
         fd.close()
-        
+
     def generate_config_h(self, config_h, config_h_in):
         """generate a config.h file based on the config.h.in template"""
 
         print("Creating {} from {} ...".format(config_h, config_h_in))
-        
+
         # grab the files
         fdin = open(config_h_in, 'r')
-        fd   = open(config_h, 'w')
+        fd = open(config_h, 'w')
 
         # emulate the extra header
-        fd.write('/* config.h.  Generated from config.h.in by pyconfigure.  */' + os.linesep)
+        fd.write('/* config.h.  Generated from config.h.in by pyconfigure.  */'
+                 + os.linesep)
 
         # iterate through the file
         for line in fdin.readlines():
 
-            # migrate uninteresting stuff 
+            # migrate uninteresting stuff
             if not line.startswith('#'):
                 fd.write(line)
                 continue
@@ -239,8 +223,8 @@ class Configure(object):
                 continue
 
             # chop it up
-            pptag,tag = line.rsplit(maxsplit=1)
-            
+            pptag, tag = line.rsplit(maxsplit=1)
+
             # handle easy undefs
             if tag not in self.config:
                 fd.write('/* ' + pptag + ' ' + tag + ' */\n')
@@ -259,19 +243,22 @@ class Configure(object):
         fdin.close()
         fd.close()
 
+
     def spawn(self, cmd_args):
 
         # run it as a subprocess to collect the output
         try:
             self.log.write(' '.join(cmd_args) + os.linesep)
-            rv = subprocess.run(cmd_args,
-                                timeout=5,
-                                check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+            rv = subprocess.run(
+                cmd_args,
+                timeout=5,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
             rv.check_returncode()
         except subprocess.TimeoutExpired as te_err:
-            self.log.write("process timeout ({:d}s) error".format(te_err.timeout) + os.linesep)
+            self.log.write("process timeout ({:d}s) error".format(
+                te_err.timeout) + os.linesep)
             self.log.write("stdout output:" + os.linesep)
             self.log.write(str(te_err.output))
             if hasattr(cp_err, 'stderr'):
@@ -280,25 +267,31 @@ class Configure(object):
             raise DistutilsExecError("command %r timed-out." % cmd_args)
 
         except subprocess.CalledProcessError as cp_err:
-            self.log.write("process error: ({:d})".format(cp_err.returncode) + os.linesep)
+            self.log.write("process error: ({:d})".format(cp_err.returncode) +
+                           os.linesep)
             if cp_err.output != b'':
                 errstrs = cp_err.output.decode('utf-8').split('\n')
                 self.log.write("stdout output:" + os.linesep)
-                for es in errstrs:
-                    self.log.write(es + os.linesep)
+                for estr in errstrs:
+                    self.log.write(estr + os.linesep)
             if hasattr(cp_err, 'stderr') and cp_err.stderr != b'':
                 errstrs = cp_err.stderr.decode('utf-8').split('\n')
                 self.log.write("stderr output:" + os.linesep)
-                for es in errstrs:
-                    self.log.write(es + os.linesep)
+                for estr in errstrs:
+                    self.log.write(estr + os.linesep)
             raise DistutilsExecError(cp_err)
 
         # success
         return
 
     def _conftest_file(self,
-                       pre_main=None, main=None, add_config=False, macros=None,
-                       header=None, includes=None, include_dirs=None):
+                       pre_main=None,
+                       main=None,
+                       add_config=False,
+                       macros=None,
+                       header=None,
+                       includes=None,
+                       include_dirs=None):
 
         if includes is None:
             includes = []
@@ -320,9 +313,9 @@ class Configure(object):
 
         # setup the defs
         if add_config:
-            conftext += ['#define {} {}'.format(t,v) for t,v in self.macros]
-        conftext += ['#define {} {}'.format(t,v) for t,v in macros]
-        
+            conftext += ['#define {} {}'.format(t, v) for t, v in self.macros]
+        conftext += ['#define {} {}'.format(t, v) for t, v in macros]
+
         # setup the headers
         if add_config:
             conftext += ['#include "%s"' % incl for incl in self.includes]
@@ -335,36 +328,33 @@ class Configure(object):
         # add in the precode
         if pre_main is not None:
             conftext += pre_main
-            
+
         # setup the body
         conftext += ['int main(void) {']
 
         # add in the main code
         if main is not None:
             for line in main:
-                conftext.append( '    ' + line )
+                conftext.append('    ' + line)
 
         # close the body
-        conftext += [
-            '    return 0;',
-            '}'
-        ]
+        conftext += ['    return 0;', '}']
 
         # log it
         for line in conftext:
             self.log.write('| ' + line + os.linesep)
 
         # create and fill the file
-        #with os.fdopen(fd, "w") as f:
-        with open(fname, "w") as f:
-            f.write(os.linesep.join(conftext))
+        with open(fname, "w") as outfile:
+            outfile.write(os.linesep.join(conftext))
 
         # just pass back the relative name
         return fname
 
     def package_info(self, name, version, release, bugreport=None, url=None):
         self.add_macro('PACKAGE_NAME', name, quoted=True)
-        self.add_macro('PACKAGE_TARNAME', '-'.join([name, release]), quoted=True)
+        self.add_macro(
+            'PACKAGE_TARNAME', '-'.join([name, release]), quoted=True)
         self.add_macro('PACKAGE_VERSION', version, quoted=True)
         self.add_macro('PACKAGE_STRING', ' '.join([name, version]), quoted=True)
         self.add_macro('PACKAGE_BUGREPORT', bugreport or '', quoted=True)
@@ -405,35 +395,36 @@ class Configure(object):
     def add_macro(self, macro, macro_value, config_value=None, quoted=False):
         if quoted:
             macro_value = '"' + macro_value + '"'
-        self.macros.append( (macro, macro_value) )
+        self.macros.append((macro, macro_value))
         if config_value is None:
             config_value = macro_value
         else:
             if quoted:
                 config_value = '"' + config_value + '"'
         self.config[macro] = config_value
-        
+
     def check_stdc(self):
         """run a set of very basic checks on the most common items."""
 
         # mark that we are "in" check_stdc
         self._checked_stdc = False
 
-
         # check ansi headers
-        oks = self.check_headers([
-            'stdlib.h', 'stdarg.h', 'string.h', 'float.h'])
+        oks = self.check_headers(
+            ['stdlib.h', 'stdarg.h', 'string.h', 'float.h'])
         if False not in oks:
             self.add_macro('STDC_HEADERS', 1)
 
         pre_main = self._get_stdc_header_defs()
-            
+
         # look for a set of basic headers
-        self.check_headers([
-            'sys/types.h', 'sys/stat.h', 'stdlib.h', 'string.h',
-            'memory.h', 'strings.h', 'inttypes.h', 'stdint.h', 'unistd.h'],
-            macros=self.macros, pre_main=pre_main
-        )
+        self.check_headers(
+            [
+                'sys/types.h', 'sys/stat.h', 'stdlib.h', 'string.h', 'memory.h',
+                'strings.h', 'inttypes.h', 'stdint.h', 'unistd.h'
+            ],
+            macros=self.macros,
+            pre_main=pre_main)
 
         # flag that the std checks are done
         self._checked_stdc = True
@@ -479,21 +470,25 @@ class Configure(object):
             pre_main.append(line.strip())
         return pre_main
 
-    def _check_compile(self, main=None, pre_main=None, add_config=False,
-                       macros=None, includes=None, include_dirs=None):
-        
+    def _check_compile(self,
+                       main=None,
+                       pre_main=None,
+                       add_config=False,
+                       macros=None,
+                       includes=None,
+                       include_dirs=None):
+
         # just setup the file
         ctfname = self._conftest_file(
             macros=macros,
             includes=includes,
             add_config=add_config,
             pre_main=pre_main,
-            main=main
-        )
-        
-        # try to compile it 
+            main=main)
+
+        # try to compile it
         try:
-            objects = self.compiler.compile(
+            _ = self.compiler.compile(
                 [ctfname],
                 include_dirs=include_dirs
                 #output_dir=os.path.dirname(ctfname)
@@ -502,32 +497,32 @@ class Configure(object):
             return False
 
         return True
-        
-    def _check_run(self, main=None, pre_main=None,
-                   macros=None, includes=None, include_dirs=None,
+
+    def _check_run(self,
+                   main=None,
+                   pre_main=None,
+                   macros=None,
+                   includes=None,
+                   include_dirs=None,
                    library_dirs=None):
-        
+
         # just setup the file
         ctfname = self._conftest_file(
-            macros=macros,
-            includes=includes,
-            pre_main=pre_main,
-            main=main
-        )
-        
-        # try to compile it 
+            macros=macros, includes=includes, pre_main=pre_main, main=main)
+
+        # try to compile it
         try:
             objects = self.compiler.compile(
                 [ctfname],
                 include_dirs=include_dirs
                 #output_dir=os.path.dirname(ctfname),
-                )
+            )
         except CompileError:
             return False
 
         # test file
         exe_file = os.path.basename(ctfname.replace('.c', ''))
-        
+
         # now try to link it...
         try:
             self.compiler.link_executable(
@@ -538,49 +533,55 @@ class Configure(object):
         except LinkError:
             return False
 
-        # run it 
+        # run it
         try:
-            self.spawn([os.path.join(self.tdir,exe_file)])
-        except DistutilsExecError as dee:
+            self.spawn([os.path.join(self.tdir, exe_file)])
+        except DistutilsExecError:
             return False
 
         # success...
         return True
-        
+
+
     def check_python(self):
         """Verify that we can actually build something to bind to Python."""
 
-        # snoop the sysconfig to pull in the relevant bits
-        import sysconfig
         #SHLIBS = "-lpthread -ldl  -lutil"
         #PY_LDFLAGS = "-Wl,-Bsymbolic-functions -Wl,-z,relro"
         #OPT = "-DNDEBUG -g -fwrapv -O2 -Wall -Wstrict-prototypes"
         #CONFINCLUDEPY = "/usr/include/python3.5m"
         #DESTLIB = "/usr/lib/python3.5"
         #BLDLIBRARY = "-lpython3.5m"
-	#BLDSHARED = "x86_64-linux-gnu-gcc -pthread -shared -Wl,-O1 -Wl,-Bsymbolic-functions -Wl,-Bsymbolic-functions -Wl,-z,relro"
+
+        #BLDSHARED = "x86_64-linux-gnu-gcc -pthread -shared -Wl,-O1
+        #                                  -Wl,-Bsymbolic-functions
+        #                                  -Wl,-Bsymbolic-functions
+        #                                  -Wl,-z,relro"
+        raise NotImplementedError
+
 
     def _check_tool(self, tool, tool_args=None):
         rv = None
-        
+
         if tool_args is None:
             tool_args = ['--garbage']
-        
+
         try:
-            rv = subprocess.run([tool]+tool_args,
-                                timeout=1,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-        except FileNotFoundError as fnfe_err:
+            rv = subprocess.run(
+                [tool] + tool_args,
+                timeout=1,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
+        except FileNotFoundError:
             # tool is not available
             return False, rv
-        except PermissionError as p_err:
+        except PermissionError:
             # found something but it is not executable
             return False, rv
-        except subprocess.TimeoutExpired as te_err:
+        except subprocess.TimeoutExpired:
             # ran it and it wedged
             return False, rv
-        except subprocess.CalledProcessError as cp_err:
+        except subprocess.CalledProcessError:
             # ran it and it failed, but got an exit code
             return True, rv
 
@@ -595,7 +596,7 @@ class Configure(object):
             self.check_msg(tool, extra="tool")
 
         # snoop it
-        ok,rec = self._check_tool(tool=tool, tool_args=tool_args)
+        ok, _ = self._check_tool(tool=tool, tool_args=tool_args)
 
         if ok:
             if verbose:
@@ -605,30 +606,39 @@ class Configure(object):
         if verbose:
             self.check_msg_result('unavailable')
         return False
-            
 
-    def check_headers(self, headers, includes=None,
-                      include_dirs=None, macros=None, pre_main=None):
+    def check_headers(self,
+                      headers,
+                      includes=None,
+                      include_dirs=None,
+                      macros=None,
+                      pre_main=None):
         """Equivalent to AC_CHECK_HEADERS"""
         results = []
-        
+
         for header in headers:
-            rv = self.check_header(header,
-                                   includes=includes,
-                                   include_dirs=include_dirs, macros=macros,
-                                   pre_main=pre_main)
+            rv = self.check_header(
+                header,
+                includes=includes,
+                include_dirs=include_dirs,
+                macros=macros,
+                pre_main=pre_main)
             results.append(rv)
 
         return results
 
-    def check_header(self, header, includes=None,
-                     include_dirs=None, macros=None, pre_main=None):
+    def check_header(self,
+                     header,
+                     includes=None,
+                     include_dirs=None,
+                     macros=None,
+                     pre_main=None):
         """Equivalent to AC_CHECK_HEADER"""
 
         # hook to be sure we do the std stuff first
         if not self._checked_stdc and self._checked_stdc is None:
             self.check_stdc()
-        
+
         # setup the message
         self.check_msg(header)
 
@@ -636,12 +646,12 @@ class Configure(object):
         cache_tag = self._cache_tag('ac_cv_header_', header)
         config_tag = self._config_tag('HAVE_', header)
         cache_loc = 'cached'
-        
+
         # check the sysconfig
         #rv = sysconfig.get_config_var(config_tag)
         rv = False
         if rv:
-            self.macros.append( (config_tag, 1) )
+            self.macros.append((config_tag, 1))
             self.includes.append(header)
             self.config[config_tag] = rv
             self.cache[cache_tag] = 'yes'
@@ -649,22 +659,20 @@ class Configure(object):
 
         # cache check
         if cache_tag in self.cache and self.cache[cache_tag] == 'yes':
-            self.check_msg_result(
-                self.cache[cache_tag] + ' ({})'.format(cache_loc)
-            )
+            self.check_msg_result(self.cache[cache_tag] +
+                                  ' ({})'.format(cache_loc))
             return True
 
         # assume the worst
         self.cache[cache_tag] = 'no'
-        
-        # create the conftest file
-        fname = self._conftest_file(header=header,
-                                    includes=includes, macros=macros,
-                                    pre_main=pre_main)
 
-        # try to compile it 
+        # create the conftest file
+        fname = self._conftest_file(
+            header=header, includes=includes, macros=macros, pre_main=pre_main)
+
+        # try to compile it
         try:
-            objects = self.compiler.compile(
+            _ = self.compiler.compile(
                 [fname],
                 include_dirs=include_dirs
                 #output_dir=os.path.dirname(fname)
@@ -674,7 +682,7 @@ class Configure(object):
             return False
 
         # inventory
-        self.macros.append( (config_tag, 1) )
+        self.macros.append((config_tag, 1))
         self.includes.append(header)
         self.config[config_tag] = 1
 
@@ -685,8 +693,13 @@ class Configure(object):
         self.check_msg_result('yes')
         return True
 
-    def check_lib(self, funcname, library=None, includes=None, 
-                  include_dirs=None, libraries=None, library_dirs=None,
+    def check_lib(self,
+                  funcname,
+                  library=None,
+                  includes=None,
+                  include_dirs=None,
+                  libraries=None,
+                  library_dirs=None,
                   msg_add_libs=False):
         """Equivalent to AC_CHECK_LIB"""
 
@@ -728,7 +741,7 @@ class Configure(object):
         # determine the tags
         cache_tag = self._cache_tag('ac_cv_func_', funcname)
         config_tag = self._config_tag('HAVE_', funcname)
-        
+
         # check the sysconfig
         rv = sysconfig.get_config_var(config_tag)
         if rv:
@@ -742,16 +755,15 @@ class Configure(object):
 
         # assume the worst
         self.cache[cache_tag] = 'no'
-        
+
         # create the conftest file
         fname = self._conftest_file(
             includes=includes,
             pre_main=['char {}(void);'.format(funcname)],
-            main=['    {}();'.format(funcname)]
-        )
+            main=['    {}();'.format(funcname)])
         # the declaration is as it is because of -Wstrict-prototypes
-        
-        # try to compile it 
+
+        # try to compile it
         try:
             objects = self.compiler.compile(
                 [fname],
@@ -762,7 +774,7 @@ class Configure(object):
             print('no')
             return False
 
-        # link it 
+        # link it
         try:
             self.compiler.link_executable(
                 objects,
@@ -786,12 +798,17 @@ class Configure(object):
 
         # update the cache
         self.cache[cache_tag] = 'yes'
-        
+
         self.check_msg_result('yes')
         return True
 
-    def check_lib_link(self, funcname, library, includes=None,
-                       include_dirs=None, libraries=None, library_dirs=None):
+    def check_lib_link(self,
+                       funcname,
+                       library,
+                       includes=None,
+                       include_dirs=None,
+                       libraries=None,
+                       library_dirs=None):
         """Verify which extra libraries are needed to link the given lib"""
 
         # need this to be a list
@@ -803,7 +820,7 @@ class Configure(object):
             libraries.insert(0, '')
 
         # remember the pre-state
-        save_LIBS = self.libraries
+        save_libs = self.libraries
 
         # check each library in turn
         for testlib in libraries:
@@ -812,19 +829,28 @@ class Configure(object):
             self.libraries = []
 
             # check the library by itself
-            if self.check_lib(funcname, library, libraries=[testlib],
-                              includes=includes, include_dirs=include_dirs,
-                              library_dirs=library_dirs, msg_add_libs=True):
+            if self.check_lib(
+                    funcname,
+                    library,
+                    libraries=[testlib],
+                    includes=includes,
+                    include_dirs=include_dirs,
+                    library_dirs=library_dirs,
+                    msg_add_libs=True):
                 return [testlib]
 
         # full restore
-        self.libraries = save_LIBS
-            
+        self.libraries = save_libs
+
         # hmm. nothing worked
         return None
-            
 
-    def check_decl(self, decl, header, includes=None, include_dirs=None, main=None):
+    def check_decl(self,
+                   decl,
+                   header,
+                   includes=None,
+                   include_dirs=None,
+                   main=None):
         """Equivalent to AC_CHECK_DECL"""
 
         # hook to be sure we do the std stuff first
@@ -845,26 +871,17 @@ class Configure(object):
 
         if main is None:
             main = [
-                '#ifndef {0}'.format(decl),
-                '#ifdef __cplusplus',
-                '  (void) {0};'.format(decl),
-                '#else',
-                '  (void) {0};'.format(decl),
-                '#endif',
-                '#endif'
+                '#ifndef {0}'.format(decl), '#ifdef __cplusplus',
+                '  (void) {0};'.format(decl), '#else',
+                '  (void) {0};'.format(decl), '#endif', '#endif'
             ]
-            
 
         # create the conftest file
-        fname = self._conftest_file(
-            header=header,
-            includes=includes,
-            main=main
-        )
+        fname = self._conftest_file(header=header, includes=includes, main=main)
 
-        # try to compile it 
+        # try to compile it
         try:
-            objects = self.compiler.compile(
+            _ = self.compiler.compile(
                 [fname],
                 include_dirs=include_dirs
                 #output_dir=os.path.dirname(fname)
@@ -884,9 +901,16 @@ class Configure(object):
         self.check_msg_result('yes')
         return True
 
-    def _check_common(self, main, cache_tag, config_tag, msg, msg_in=None,
-                      msg_extra=None, add_config=False,
-                      includes=None, include_dirs=None):
+    def _check_common(self,
+                      main,
+                      cache_tag,
+                      config_tag,
+                      msg,
+                      msg_in=None,
+                      msg_extra=None,
+                      add_config=False,
+                      includes=None,
+                      include_dirs=None):
         """Common code for generic checking"""
 
         # hook to be sure we do the std stuff first
@@ -911,14 +935,11 @@ class Configure(object):
 
         # create the conftest file
         fname = self._conftest_file(
-            includes=includes,
-            add_config=add_config,
-            main=main
-        )
+            includes=includes, add_config=add_config, main=main)
 
-        # try to compile it 
+        # try to compile it
         try:
-            objects = self.compiler.compile(
+            _ = self.compiler.compile(
                 [fname],
                 include_dirs=include_dirs
                 #output_dir=os.path.dirname(fname)
@@ -935,30 +956,33 @@ class Configure(object):
         self.check_msg_result('yes')
         return True
 
+
     def check_type(self, type_name, includes=None, include_dirs=None):
         """Emulate AC_CHECK_TYPES"""
         cache_tag = self._cache_tag('ac_cv_type_', type_name)
         config_tag = self._config_tag('HAVE_', type_name)
-        main = [
-            'if (sizeof ({})) {{'.format(type_name),
-            '    return 0;',
-            '}'
-        ]
+        main = ['if (sizeof ({})) {{'.format(type_name), '    return 0;', '}']
         return self._check_common(
-            main, cache_tag, config_tag, add_config=True,
+            main,
+            cache_tag,
+            config_tag,
+            add_config=True,
             msg=type_name,
-            includes=includes, include_dirs=include_dirs)
-    
-    def check_member(self, type_name, member_name,
-                     includes=None, include_dirs=None):
+            includes=includes,
+            include_dirs=include_dirs)
+
+    def check_member(self,
+                     type_name,
+                     member_name,
+                     includes=None,
+                     include_dirs=None):
         """Emulate AC_CHECK_MEMBER"""
-        cache_tag = self._cache_tag('ac_cv_type_', type_name + '_' + member_name)
+        cache_tag = self._cache_tag('ac_cv_type_',
+                                    type_name + '_' + member_name)
         config_tag = self._config_tag('HAVE_', type_name + '_' + member_name)
         main = [
             'static {} ac_aggr;'.format(type_name),
-            'if (ac_aggr.{}) {{'.format(member_name),
-            '    return 0;',
-            '}'
+            'if (ac_aggr.{}) {{'.format(member_name), '    return 0;', '}'
         ]
 
         # bail if we don't even have the type
@@ -968,9 +992,14 @@ class Configure(object):
 
         # ok, see if the member is valid
         return self._check_common(
-            main, cache_tag, config_tag, add_config=True,
-            msg=member_name, msg_in=type_name,
-            includes=includes, include_dirs=include_dirs)
+            main,
+            cache_tag,
+            config_tag,
+            add_config=True,
+            msg=member_name,
+            msg_in=type_name,
+            includes=includes,
+            include_dirs=include_dirs)
 
     def check_use_system_extensions(self):
         """Emulate AC_USE_SYSTEM_EXTENSIONS"""
@@ -982,8 +1011,7 @@ class Configure(object):
 
         ok = self._check_compile(
             macros=self.macros,
-            pre_main=['#define __EXTENSIONS__ 1']+pre_main
-        )
+            pre_main=['#define __EXTENSIONS__ 1'] + pre_main)
         if ok:
             self.check_msg_result('yes')
             self.add_macro('__EXTENSIONS__', 1)
@@ -996,19 +1024,14 @@ class Configure(object):
 
         return ok
 
-
-
     def check_header_dirent(self):
         """Emulate AC_HEADER_DIRENT"""
         for header in ['dirent.h', 'sys/ndir.h', 'sys/dir.h', 'ndir.h']:
-            ok = self.check_decl('DIR', header,
-                                 includes=['sys/types.h'],
-                                 main=[
-                                     'if ((DIR *) 0) {',
-                                     '   return 0;',
-                                     '}'
-                                 ]
-            )
+            ok = self.check_decl(
+                'DIR',
+                header,
+                includes=['sys/types.h'],
+                main=['if ((DIR *) 0) {', '   return 0;', '}'])
             if ok:
                 tag = self._config_tag('HAVE_', header)
                 self.add_macro(tag, 1)
@@ -1030,7 +1053,7 @@ class Configure(object):
             self.add_macro('RETSIGTYPE', 'void')
             return True
 
-        # estimate it 
+        # estimate it
         ok = self.check_header('sys/signal.h', includes=['sys/types.h'])
         if ok:
             self.cache[cache_tag] = 'void'
@@ -1068,34 +1091,34 @@ class Configure(object):
         self.check_msg(fcn)
 
         # setup the tags
-        HF = self._config_tag('HAVE_', fcn)
+        havef = self._config_tag('HAVE_', fcn)
         chf = self._cache_tag('ac_cv_func_', fcn)
-        HWF = self._config_tag('HAVE_WORKING_', fcn)
+        have_wf = self._config_tag('HAVE_WORKING_', fcn)
         chwf = chf + '_working'
 
         # python check this already?
-        ok = sysconfig.get_config_var(HF)
+        ok = sysconfig.get_config_var(havef)
         if ok:
-            self.add_macro(HF, 1)
+            self.add_macro(havef, 1)
             self.cache[chf] = 'yes'
             rv = True
         else:
             # ok, see if it is there
             ok = self.check_lib(fcn)
             if ok:
-                self.add_macro(HF, 1)
+                self.add_macro(havef, 1)
                 self.cache[chf] = 'yes'
                 rv = True
 
         # check for it working...
-        ok = sysconfig.get_config_var(HWF)
+        ok = sysconfig.get_config_var(have_wf)
         if ok:
-            self.add_macro(HWF, 1)
+            self.add_macro(have_wf, 1)
             self.cache[chwf] = 'yes'
             rv = True
         else:
             # assuming this for now...
-            self.add_macro(HWF, 1)
+            self.add_macro(have_wf, 1)
             self.cache[chwf] = 'yes'
             rv = True
 
@@ -1108,19 +1131,18 @@ class Configure(object):
         return rv
 
     def check_func_vfork(self):
-        # setup the defs 
+        # setup the defs
         self.check_header('vfork.h')
 
         # check the function
         return self.check_func_fork(fcn='vfork')
-        
+
     #AC_PROG_GCC_TRADITIONAL
 
     def check_func_stat(self):
         """Emulate AC_FUNC_STAT"""
-        ok = self.check_header('sys/stat.h')
+        self.check_header('sys/stat.h')
         return self.check_lib('stat')
-
 
     def check_func_lstat(self):
         # do we have it
@@ -1150,21 +1172,21 @@ class Configure(object):
             # make a basic file
             with open(testfile, 'w') as tfd:
                 tfd.write('garbage' + os.linesep)
-            
+
             # setup the framework
             os.symlink(testfile, symfile)
-        
-        except NotImplementedError as nie:
+
+        except NotImplementedError:
             self.log.write("failed to create symlink for test: " + symfile)
             return False
-        
+
         # compile and run
-        ok = self._check_run(main=[
-            'struct stat sbuf;',
-            'return lstat ("{}/", &sbuf) == 0;'.format(symfile)
+        ok = self._check_run(
+            main=[
+                'struct stat sbuf;',
+                'return lstat ("{}/", &sbuf) == 0;'.format(symfile)
             ],
-            includes=self.includes
-        )
+            includes=self.includes)
 
         if not ok:
             self.check_msg_result('no')
@@ -1174,7 +1196,7 @@ class Configure(object):
         self.add_macro('LSTAT_FOLLOWS_SLASHED_SYMLINK', 1)
         self.check_msg_result('yes')
         return True
-        
+
     def check_getpw_r__posix(self):
         self.check_msg('getpw*_r are posix like')
 
@@ -1184,28 +1206,26 @@ class Configure(object):
             main=[
                 'getpwnam_r(NULL, NULL, NULL, (size_t)0, NULL);',
                 'getpwuid_r((uid_t)0, NULL, NULL, (size_t)0, NULL);'
-                ]
-            )
-        
+            ])
+
         if not ok:
             self.check_msg_result('no')
             return False
-        
+
         self.check_msg_result('yes')
         self.add_macro('HAVE_GETPW_R_POSIX', 1)
         return True
-    
+
     def check_getpw_r__draft(self):
         self.check_msg('getpw*_r are draft like')
-        
+
         ok = self._check_compile(
             includes=['stdlib.h', 'sys/types.h', 'pwd.h'],
             add_config=True,
             main=[
                 'getpwnam_r(NULL, NULL, NULL, (size_t)0);',
                 'getpwuid_r((uid_t)0, NULL, NULL, (size_t)0);'
-                ]
-        )
+            ])
 
         if not ok:
             self.check_msg_result('no')
@@ -1217,126 +1237,101 @@ class Configure(object):
 
 
 def check_system():
-        """Run the system inspection to create config.h"""
-        # setup the configurator
-        ctool = Configure('conf_edit', debug=True, tmpdir='/tmp/conf_test')
-        ctool.package_info('libedit', '3.1', '20180321')
+    """Run the system inspection to create config.h"""
+    # setup the configurator
+    ctool = Configure('conf_edit', debug=True, tmpdir='/tmp/conf_test')
+    ctool.package_info('libedit', '3.1', '20180321')
 
-        # early items...
-        ctool.check_stdc()
-        ctool.check_use_system_extensions()
+    # early items...
+    ctool.check_stdc()
+    ctool.check_use_system_extensions()
 
-        # check for the necessary system header files
-        ctool.check_headers([
-            'fcntl.h', 'limits.h', 'malloc.h', 'stdlib.h', 'string.h',
-            'sys/ioctl.h', 'sys/param.h', 'unistd.h', 'sys/cdefs.h',
-            'dlfcn.h', 'inttypes.h'])
+    # check for the necessary system header files
+    ctool.check_headers([
+        'fcntl.h', 'limits.h', 'malloc.h', 'stdlib.h', 'string.h',
+        'sys/ioctl.h', 'sys/param.h', 'unistd.h', 'sys/cdefs.h', 'dlfcn.h',
+        'inttypes.h'
+    ])
 
-        # some uncommon headers
-        ctool.check_header_dirent()
-        ctool.check_header_sys_wait()
-        
-        # figure out which terminal lib we have
-        for testlib in ['tinfo', 'ncurses', 'ncursesw', 'curses', 'termcap']:
-            ok = ctool.check_lib('tgetent', testlib)
-            if ok:
-                break
-        
-        # check for terminal headers
-        term_headers = ['curses.h', 'ncurses.h', 'termcap.h']
-        oks = ctool.check_headers(term_headers)
-        if True not in oks:
-            raise ConfigureError("Must have one of: " + ', '.join(term_headers))
+    # some uncommon headers
+    ctool.check_header_dirent()
+    ctool.check_header_sys_wait()
 
-        # must have termios.h
-        ok = ctool.check_header('termios.h')
-        if not ok:
-            raise ConfigureError("'termios.h' is required!")
-
-        # must have term.h
-        ctool.check_header('term.h')
-
-        #AC_C_CONST
-        ctool.check_type_pid_t()
-        ctool.check_type_size_t()
-        ctool.check_type('u_int32_t')
-        
-        #AC_FUNC_CLOSEDIR_VOID
-        ctool.check_func_fork()
-        ctool.check_func_vfork()
-        #AC_PROG_GCC_TRADITIONAL
-        ctool.check_type_signal()
-        #AC_FUNC_STAT
-
-
-        # check for bsd/string.h -- mainly for linux
-        ok = ctool.check_header('bsd/string.h')
+    # figure out which terminal lib we have
+    for testlib in ['tinfo', 'ncurses', 'ncursesw', 'curses', 'termcap']:
+        ok = ctool.check_lib('tgetent', testlib)
         if ok:
-            ctool.check_lib('strlcpy', 'bsd')
+            break
+
+    # check for terminal headers
+    term_headers = ['curses.h', 'ncurses.h', 'termcap.h']
+    oks = ctool.check_headers(term_headers)
+    if True not in oks:
+        raise ConfigureSystemHeaderFileError(term_headers)
+
+    # must have termios.h
+    ok = ctool.check_header('termios.h')
+    if not ok:
+        raise ConfigureSystemHeaderFileError(['termios.h'])
+
+    # must have term.h
+    ctool.check_header('term.h')
+
+    #AC_C_CONST
+    ctool.check_type_pid_t()
+    ctool.check_type_size_t()
+    ctool.check_type('u_int32_t')
+
+    #AC_FUNC_CLOSEDIR_VOID
+    ctool.check_func_fork()
+    ctool.check_func_vfork()
+    #AC_PROG_GCC_TRADITIONAL
+    ctool.check_type_signal()
+    #AC_FUNC_STAT
+
+    # check for bsd/string.h -- mainly for linux
+    ok = ctool.check_header('bsd/string.h')
+    if ok:
+        ctool.check_lib('strlcpy', 'bsd')
+
+    # check a bunch of standard-ish functions
+    fcns = [
+        'endpwent', 'isascii', 'memchr', 'memset', 're_comp', 'regcomp',
+        'strcasecmp', 'strchr', 'strcspn', 'strdup', 'strerror', 'strrchr',
+        'strstr', 'strtol', 'issetugid', 'wcsdup', 'strlcpy', 'strlcat',
+        'getline', 'vis', 'strvis', 'unvis', 'strunvis', '__secure_getenv',
+        'secure_getenv'
+    ]
+    for fcn in fcns:
+        ctool.check_lib(fcn, libraries=ctool.libraries)
+
+    ctool.check_func_lstat()
+
+    # these probably should be local
+    ctool.check_getpw_r__posix()
+    ctool.check_getpw_r__draft()
+
+    #print("exlibs3:", exlibs)
+    #print("libs3:", ctool.libraries)
+
+    ctool.dump()
+
+    # looks good - add the extra libraries if any
+    #clib['libraries'] += ctool.libraries
+
+    # locate the config template and output
+    #config_h = os.path.join(self.build_temp, self.libedit_dir, 'config.h')
+    #config_h_in = os.path.join(self.libedit_dir, 'config.h.in')
+    config_h = '/tmp/config.h'
+    config_h_in = '/home/mjn/work/python/pe-test/src/libedit/config.h.in'
+
+    # barf out the config.h file from config.h.in
+    ctool.generate_config_h(config_h, config_h_in)
+    ctool.generate_config_log(config_h.replace('.h', '.log'))
+
+    # done
+    return ctool
 
 
-        # check a bunch of standard-ish functions
-        fcns = [
-            'endpwent', 'isascii', 'memchr', 'memset', 're_comp',
-            'regcomp', 'strcasecmp', 'strchr', 'strcspn', 'strdup', 'strerror',
-            'strrchr', 'strstr', 'strtol', 'issetugid', 'wcsdup', 'strlcpy',
-            'strlcat', 'getline', 'vis', 'strvis', 'unvis', 'strunvis',
-            '__secure_getenv', 'secure_getenv']
-        for fcn in fcns:
-            ctool.check_lib(fcn, libraries=ctool.libraries)
-
-        ctool.check_func_lstat()
-            
-        # these probably should be local
-        ctool.check_getpw_r__posix()
-        ctool.check_getpw_r__draft()
-            
-        #print("exlibs3:", exlibs)
-        #print("libs3:", ctool.libraries)
-
-        ctool.dump()
-        
-        # looks good - add the extra libraries if any
-        #clib['libraries'] += ctool.libraries
-
-        # locate the config template and output
-        #config_h = os.path.join(self.build_temp, self.libedit_dir, 'config.h')
-        #config_h_in = os.path.join(self.libedit_dir, 'config.h.in')
-        config_h = '/tmp/config.h'
-        config_h_in = '/home/mjn/work/python/pe-test/src/libedit/config.h.in'
-        
-        # barf out the config.h file from config.h.in
-        ctool.generate_config_h(config_h, config_h_in)
-        ctool.generate_config_log(config_h.replace('.h','.log'))
-        
-        # done
-        return ctool
-
-
-
-        
 if __name__ == '__main__':
-    if False:
-        cf = Configure(debug=True)
-        rv = cf.check_lib('el_init', 'edit', libraries=[''])
-        rv = cf.check_header('histedit.h')
-        oks = cf.check_headers(['stdio.h', 'stdlib.h', 'string.h'])
-        rv = cf.check_header('Python.h')
-        rv = cf.check_header('Bork.h')
-        rv = cf.check_decl('EL_EDITOR', 'histedit.h')
-        libs = cf.check_lib_link('el_init', 'edit',
-                                libraries=['', 'tinfo', 'ncurses',
-                                        'curses', 'termcap'])
-        if libs is None or '' in libs:
-            print("libedit needs: none")
-        else:
-            print("libedit needs:", ' -l'.join(libs))
-            cf.libraries += libs
-    
-        print("LIBS:", cf.libraries)
-        #pp.pprint(cf.libraries)
-        print("Config:")
-        pp.pprint(cf.config)
-
-    else:
-        check_system()
+    check_system()

@@ -1,7 +1,17 @@
-#
-# Track a version here
-#
-version_info = [ 0, 1, 2 ]
+"""
+ Track versioning.
+"""
+
+VERSION_INFO = [0, 1, 2]
 
 def version():
-    return '{}.{}.{}'.format(version_info[0], version_info[1], version_info[2])
+    """Return the version number of this module.
+
+    Args:
+        None
+
+    Returns:
+        String containing the major, minor, micro version number.
+
+    """
+    return '{}.{}.{}'.format(VERSION_INFO[0], VERSION_INFO[1], VERSION_INFO[2])
