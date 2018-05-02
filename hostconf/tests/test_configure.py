@@ -1,13 +1,15 @@
 """
-Unit testing for parts of the editline and _editline modules.
+Unit testing for parts of the hostconf modules.
+
 """
+
 import os
 import sys
 import unittest
 import subprocess
 from test.support import import_module
 
-class TestEditline(unittest.TestCase):
+class TestHostconf(unittest.TestCase):
 
     def test_001_import_pkg(self):
         hostconf = import_module('hostconf')

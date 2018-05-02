@@ -16,7 +16,7 @@ from distutils.errors import DistutilsExecError, CompileError, LinkError
 from distutils.ccompiler import new_compiler
 from distutils.sysconfig import customize_compiler
 
-from config_errors import ConfigureSystemHeaderFileError
+from hostconf.config_errors import ConfigureSystemHeaderFileError
 
 #
 #  It turns out that older subprocess modules did not have the 'run'
