@@ -1,7 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+"""
+Basic setup script for the hostconf module.
 
-import sys
-import os
+"""
+
 from distutils.core import setup
 
 import hostconf
@@ -21,7 +23,7 @@ with open('README') as fd:
         __doc__ += line
 
 # append this
-__doc__ += """Have a look at the README.md in the source repo.
+__doc__ += """Have a look at the README in the source repo.
 """
 
 #
