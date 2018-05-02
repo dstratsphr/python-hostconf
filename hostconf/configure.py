@@ -21,7 +21,20 @@ from hostconf.config_errors import ConfigureSystemHeaderFileError
 
 
 class Configure(object):
-    """Base class for common support aspects of the configuration process."""
+    """Base class for common support aspects of the configuration process.
+
+    Args:
+        name: the name of the configuration instance
+        compiler:  specify which compiler to use  (default: distutils)
+        tmpdir:  specify a temp-dir to use
+        verbose: explain the process as it goes
+        dry_run: do not actually do the testing (default: False)
+        debug:   engage debug infra (default: False)
+
+    Notes:
+        Harvests `distutils` heavily to setup the tooling infra.
+
+    """
 
     cache = {}
     config = {}
@@ -71,14 +84,20 @@ class Configure(object):
         self._spawn = self.compiler.spawn
         self.compiler.spawn = self.spawn
 
+
     def __del__(self):
+        """Destructor must tidy up a few things specifically."""
         if self.log:
             self.log.close()
 
         if not self.debug:
             shutil.rmtree(self.tdir)
 
+
     def dump(self):
+        """Print out a detailled state of the instance.
+
+        """
         ppt = PrettyPrinter(indent=4)
         print("Configure.config:")
         ppt.pprint(self.config)
@@ -93,6 +112,7 @@ class Configure(object):
         print("Configure.libraries:")
         ppt.pprint(self.libraries)
 
+
     @staticmethod
     def _cache_tag(prefix, tag):
         """Create a cache tag name"""
@@ -100,6 +120,7 @@ class Configure(object):
         tag = tag.replace('.', '_')
         tag = tag.replace(' ', '_')
         return prefix + tag
+
 
     @staticmethod
     def _config_tag(prefix, tag):
@@ -109,8 +130,14 @@ class Configure(object):
         tag = tag.replace(' ', '_')
         return prefix + tag.upper()
 
+
     def generate_config_log(self, config_log):
-        """Somewhat puke out a similar log file to the config.log"""
+        """Write out a similar log file format to the config.log
+
+        Args:
+            config_log: name of file to create
+
+        """
 
         fd = open(config_log, 'w')
 
@@ -144,8 +171,15 @@ class Configure(object):
         # done
         fd.close()
 
+
     def generate_config_h(self, config_h, config_h_in):
-        """generate a config.h file based on the config.h.in template"""
+        """Generate a config.h format file based on the config.h.in template.
+
+        Args:
+            config_h:    output filename
+            config_h_in: input/template filename
+
+        """
 
         print("Creating {} from {} ...".format(config_h, config_h_in))
 
@@ -193,6 +227,18 @@ class Configure(object):
 
 
     def spawn(self, cmd_args):
+        """Run a given command and collect information.
+
+        Args:
+            cmd_args: list of command-line parameters
+
+        Returns:
+            Nothing
+
+        Raises:
+            DistutilsExecError -- indicating the problem
+
+        """
 
         # run it as a subprocess to collect the output
         try:
@@ -232,6 +278,7 @@ class Configure(object):
         # success
         return
 
+
     def _conftest_file(self,
                        pre_main=None,
                        main=None,
@@ -240,6 +287,21 @@ class Configure(object):
                        header=None,
                        includes=None,
                        include_dirs=None):
+        """Create a file and build out the contents for a test.
+
+        Args:
+            pre_main:   lines of code to place before main()
+            main:       lines of code to place in main()
+            add_config: populate the known configuration macros and includes
+            macros:     extra macros to define
+            header:     primary header file to include
+            includes: list of headers to add after the system headers
+            include_dirs:  directories to add to the build path
+
+        Returns:
+            Filename of the prepared file.
+
+        """
 
         if includes is None:
             includes = []
@@ -299,7 +361,22 @@ class Configure(object):
         # just pass back the relative name
         return fname
 
+
     def package_info(self, name, version, release, bugreport=None, url=None):
+        """Create package information similar to autoconf.
+
+        Args:
+            name:        name of package
+            version:     version string
+            release:     release string
+            bugreport:   email address to send bug info
+            url:         URL for further info
+
+        Returns:
+            Nothing.
+
+        """
+
         self.add_macro('PACKAGE_NAME', name, quoted=True)
         self.add_macro(
             'PACKAGE_TARNAME', '-'.join([name, release]), quoted=True)
@@ -313,7 +390,19 @@ class Configure(object):
         # this is not really valid, but should be there
         self.config['LT_OBJDIR'] = '".libs/"'
 
+
     def check_msg(self, item, item_in=None, extra=None):
+        """Common messaging routine to create autoconf style output.
+
+        Args:
+            item:   name of item
+            item_in:  component it is inside
+            extra:   additional text
+
+        Returns:
+            Nothing
+
+        """
         # format the banner
         msg = "checking for " + item
         if item_in is not None:
@@ -331,7 +420,17 @@ class Configure(object):
         # print to the terminal without a line ending
         print(msg, end='')
 
+
     def check_msg_result(self, msg):
+        """Common message result in a similar format to autoconf.
+
+        Args:
+            msg:  message to display
+
+        Returns:
+            Nothing
+
+        """
         logmsg = "result: " + msg
         self.log.write(os.linesep)
         self.log.write('#' * len(logmsg) + os.linesep)
@@ -340,7 +439,21 @@ class Configure(object):
 
         print(msg)
 
+
     def add_macro(self, macro, macro_value, config_value=None, quoted=False):
+        """Add a C-Pre-Procesor macro or define to the catalogue.
+
+        Args:
+            macro:        name of the macro
+            macro_value:  value to assign
+            config_value: value to add to the 'config' catalogue if
+                          different from macro_value
+            quoted:       put the `macro_value` into double-quotes
+
+        Returns:
+            Nothing
+
+        """
         if quoted:
             macro_value = '"' + macro_value + '"'
         self.macros.append((macro, macro_value))
@@ -351,8 +464,14 @@ class Configure(object):
                 config_value = '"' + config_value + '"'
         self.config[macro] = config_value
 
+
     def check_stdc(self):
-        """run a set of very basic checks on the most common items."""
+        """Run a set of very basic checks on the most common items.
+
+        This will update the various catalogues with the results of checking
+        the basic C infrastructure files
+
+        """
 
         # mark that we are "in" check_stdc
         self._checked_stdc = False
@@ -377,7 +496,11 @@ class Configure(object):
         # flag that the std checks are done
         self._checked_stdc = True
 
+
     def _get_stdc_header_defs(self):
+        """Generate a common set of header file and macro exclusions for
+        `standard-c` type usage.
+        """
         pre_main_text = '''
         #include <stdio.h>
         #ifdef HAVE_SYS_TYPES_H
@@ -418,6 +541,7 @@ class Configure(object):
             pre_main.append(line.strip())
         return pre_main
 
+
     def _check_compile(self,
                        main=None,
                        pre_main=None,
@@ -425,6 +549,20 @@ class Configure(object):
                        macros=None,
                        includes=None,
                        include_dirs=None):
+        """Compile a file incorporating the given parameters.
+
+        Args:
+            main:       lines of code to place in main()
+            pre_main:   lines of code to place before main()
+            add_config: populate the known configuration macros and includes
+            macros:     extra macros to define
+            includes: list of headers to add after the system headers
+            include_dirs:  directories to add to the build path
+
+        Returns:
+            boolean -- True on successful compile
+
+        """
 
         # just setup the file
         ctfname = self._conftest_file(
@@ -453,6 +591,20 @@ class Configure(object):
                    includes=None,
                    include_dirs=None,
                    library_dirs=None):
+        """Compile, link and RUN a file incorporating the given parameters.
+
+        Args:
+            main:       lines of code to place in main()
+            pre_main:   lines of code to place before main()
+            add_config: populate the known configuration macros and includes
+            macros:     extra macros to define
+            includes: list of headers to add after the system headers
+            include_dirs:  directories to add to the build path
+
+        Returns:
+            boolean -- True on successful run
+
+        """
 
         # just setup the file
         ctfname = self._conftest_file(
@@ -509,6 +661,17 @@ class Configure(object):
 
 
     def _check_tool(self, tool, tool_args=None):
+        """Verify that a given tool is available on the command-line.
+
+        Args:
+            tool:  name of the tool
+            tool_args: optional arguments for the tool
+
+        Returns:
+            boolean -- True if the tool is present
+            int     -- return code from the execution
+
+        """
         rv = None
 
         if tool_args is None:
@@ -536,8 +699,19 @@ class Configure(object):
         # all good
         return True, rv
 
+
     def check_tool(self, tool, tool_args=None, verbose=True):
-        """Try to locate a tool"""
+        """Try to locate a tool.
+
+        Args:
+            tool:  name of the tool
+            tool_args: optional arguments for the tool
+            verbose: add detail to the output
+
+        Returns:
+            boolean -- True if the tool is present
+
+        """
 
         # setup the message
         if verbose:
@@ -555,13 +729,30 @@ class Configure(object):
             self.check_msg_result('unavailable')
         return False
 
+
     def check_headers(self,
                       headers,
                       includes=None,
                       include_dirs=None,
                       macros=None,
                       pre_main=None):
-        """Equivalent to AC_CHECK_HEADERS"""
+        """Check for the presence and usability of a set of headers.
+
+        Args:
+            headers:    list of header file names to check
+            includes: list of headers to add after the system headers
+            include_dirs:  directories to add to the build path
+            macros:     extra macros to define
+            pre_main:   lines of code to place before main()
+
+        Returns:
+            listof booleans -- True indicates the the successful inspection
+                               of that particular header file.
+
+        Notes:
+            Equivalent to AC_CHECK_HEADERS
+
+        """
         results = []
 
         for header in headers:
@@ -575,13 +766,30 @@ class Configure(object):
 
         return results
 
+
     def check_header(self,
                      header,
                      includes=None,
                      include_dirs=None,
                      macros=None,
                      pre_main=None):
-        """Equivalent to AC_CHECK_HEADER"""
+        """Check for the presence and usability of a set of headers.
+
+        Args:
+            headers:    list of header file names to check
+            includes: list of headers to add after the system headers
+            include_dirs:  directories to add to the build path
+            macros:     extra macros to define
+            pre_main:   lines of code to place before main()
+
+        Returns:
+            listof booleans -- True indicates the the successful inspection
+                               of that particular header file.
+
+        Notes:
+            Equivalent to AC_CHECK_HEADER
+
+        """
 
         # hook to be sure we do the std stuff first
         if not self._checked_stdc and self._checked_stdc is None:
@@ -641,6 +849,7 @@ class Configure(object):
         self.check_msg_result('yes')
         return True
 
+
     def check_lib(self,
                   funcname,
                   library=None,
@@ -649,7 +858,27 @@ class Configure(object):
                   libraries=None,
                   library_dirs=None,
                   msg_add_libs=False):
-        """Equivalent to AC_CHECK_LIB"""
+        """Check for the presence and usability of a function in a library.
+
+        Args:
+            funcname:     name of function to check in a library
+            library:      optional specific library to include
+            includes:     optional list of headers to add after the
+                          system headers
+            include_dirs: optional directories to add to the build path
+            libraries:    optional list of libraries to add to the link command
+            library_dirs: optional directories to add to the linker path
+            msg_add_libs: optional report which libraries are being added to
+                          the output
+
+        Returns:
+            listof booleans -- True indicates the the successful inspection
+                               of that particular header file.
+
+        Notes:
+            Equivalent to AC_CHECK_LIB
+
+        """
 
         # hook to be sure we do the std stuff first
         if not self._checked_stdc and self._checked_stdc is None:
@@ -750,6 +979,7 @@ class Configure(object):
         self.check_msg_result('yes')
         return True
 
+
     def check_lib_link(self,
                        funcname,
                        library,
@@ -757,7 +987,27 @@ class Configure(object):
                        include_dirs=None,
                        libraries=None,
                        library_dirs=None):
-        """Verify which extra libraries are needed to link the given lib"""
+        """Verify which extra libraries are needed to link the given lib
+
+        Args:
+            funcname:     name of function to check in a library
+            library:      optional specific library to include
+            includes:     optional list of headers to add after the
+                          system headers
+            include_dirs: optional directories to add to the build path
+            libraries:    optional list of libraries to add to the link command
+            library_dirs: optional directories to add to the linker path
+
+        Returns:
+            list of libs -- The list of libraries needed to link the
+                            function and lib.
+                         -- Can return `None` in the case that it cannot
+                            be linked at all.
+
+        Notes:
+            This has no specific autoconf counterpart.
+
+        """
 
         # need this to be a list
         if libraries is None:
@@ -793,13 +1043,30 @@ class Configure(object):
         # hmm. nothing worked
         return None
 
+
     def check_decl(self,
                    decl,
                    header,
                    includes=None,
                    include_dirs=None,
                    main=None):
-        """Equivalent to AC_CHECK_DECL"""
+        """Verify a declaration is available in a header file.
+
+        Args:
+            decl:         name of function to check in a library
+            header:       header file to inspect
+            includes:     optional list of headers to add after the
+                          system headers
+            include_dirs: optional directories to add to the build path
+            main:         optional extra code lines for the main() function
+
+        Returns:
+            boolean -- True if the declaration is available.
+
+        Notes:
+            Equivalent to AC_CHECK_DECL.
+
+        """
 
         # hook to be sure we do the std stuff first
         if not self._checked_stdc and self._checked_stdc is None:
@@ -849,6 +1116,7 @@ class Configure(object):
         self.check_msg_result('yes')
         return True
 
+
     def _check_common(self,
                       main,
                       cache_tag,
@@ -859,7 +1127,24 @@ class Configure(object):
                       add_config=False,
                       includes=None,
                       include_dirs=None):
-        """Common code for generic checking"""
+        """Common code for generic checks
+
+        Args:
+            main:         lines of code to put in main()
+            cache_tag:    string used in the cache catalogue
+            config_tag:   string used in the config catalogue
+            msg:          string message for console display
+            msg_in:       optional text for checking inside something else
+            msg_extra:    optional extra text for display
+            add_config:   populate the known configuration macros and includes
+            includes:     optional list of headers to add after the
+                          system headers
+            include_dirs: optional directories to add to the build path
+
+        Returns:
+            boolean:  True if available.
+
+        """
 
         # hook to be sure we do the std stuff first
         if not self._checked_stdc and self._checked_stdc is None:
@@ -906,7 +1191,20 @@ class Configure(object):
 
 
     def check_type(self, type_name, includes=None, include_dirs=None):
-        """Emulate AC_CHECK_TYPES"""
+        """Inspect the system to see if it supports a specific C/C++ type-name
+
+        Args:
+            type_name:    C type-name to check for
+            includes:     optional - headers to add after the system headers
+            include_dirs: optional - directories to add to the build path
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulate AC_CHECK_TYPES
+
+        """
         cache_tag = self._cache_tag('ac_cv_type_', type_name)
         config_tag = self._config_tag('HAVE_', type_name)
         main = ['if (sizeof ({})) {{'.format(type_name), '    return 0;', '}']
@@ -919,12 +1217,27 @@ class Configure(object):
             includes=includes,
             include_dirs=include_dirs)
 
+
     def check_member(self,
                      type_name,
                      member_name,
                      includes=None,
                      include_dirs=None):
-        """Emulate AC_CHECK_MEMBER"""
+        """Inspect the system to see if it supports a specific C/C++ type-name
+
+        Args:
+            type_name:    C/C++ type name or struct name
+            member_name:  structure member-name to check
+            includes:     optional - headers to add after the system headers
+            include_dirs: optional - directories to add to the build path
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulate AC_CHECK_MEMBER
+
+        """
         cache_tag = self._cache_tag('ac_cv_type_',
                                     type_name + '_' + member_name)
         config_tag = self._config_tag('HAVE_', type_name + '_' + member_name)
@@ -949,8 +1262,20 @@ class Configure(object):
             includes=includes,
             include_dirs=include_dirs)
 
+
     def check_use_system_extensions(self):
-        """Emulate AC_USE_SYSTEM_EXTENSIONS"""
+        """Verify if the system uses standard system-extension definitions
+
+        Args:
+            None
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_USE_SYSTEM_EXTENSIONS
+
+        """
 
         # setup the message
         self.check_msg('system extensions')
@@ -972,8 +1297,20 @@ class Configure(object):
 
         return ok
 
+
     def check_header_dirent(self):
-        """Emulate AC_HEADER_DIRENT"""
+        """Inspect headers available which implement `dirent`.
+
+        Args:
+            None
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_HEADER_DIRENT
+
+        """
         for header in ['dirent.h', 'sys/ndir.h', 'sys/dir.h', 'ndir.h']:
             ok = self.check_decl(
                 'DIR',
@@ -986,12 +1323,36 @@ class Configure(object):
                 return True
         return False
 
+
     def check_header_sys_wait(self):
-        """Emulate AC_HEADER_SYS_WAIT"""
+        """Inspect the system's availability of sys/wait.h
+
+        Args:
+            None.
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_HEADER_SYS_WAIT
+
+        """
         return self.check_header('sys/wait.h', includes=['sys/types.h'])
 
+
     def check_type_signal(self):
-        """Emulate AC_TYPE_SIGNAL"""
+        """Inspect the system usage and type of `signal`.
+
+        Args:
+            None.
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_TYPE_SIGNAL
+
+        """
         cache_tag = self._cache_tag('ac_cv_type_', 'signal')
 
         # check the sysconfig
@@ -1010,16 +1371,40 @@ class Configure(object):
 
     #AC_C_CONST
 
+
     def check_type_pid_t(self):
-        """Emulate AC_TYPE_PID_T"""
+        """Inspect the system type name for `pid_t`.
+
+        Args:
+            None.
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_TYPE_PID_T
+
+        """
         rv = sysconfig.get_config_var('SIZEOF_PID_T')
         if rv:
             self.add_macro('HAVE_PID_T', rv)
             return True
         return self.check_type('pid_t')
 
+
     def check_type_size_t(self):
-        """Emulate AC_TYPE_SIZE_T"""
+        """Inspect the system type name for `size_t`.
+
+        Args:
+            None.
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_TYPE_SIZE_T
+
+        """
         rv = sysconfig.get_config_var('SIZEOF_SSIZE_T')
         if rv:
             self.add_macro('HAVE_SIZE_T', rv)
@@ -1029,7 +1414,18 @@ class Configure(object):
     #AC_FUNC_CLOSEDIR_VOID
 
     def check_func_fork(self, fcn='fork'):
-        """Emulate AC_FUNC_FORK"""
+        """Inspect the system for unix `fork` function.
+
+        Args:
+            fcn:  supply the 'fork' function name (default: fork)
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_FUNC_FORK
+
+        """
         rv = False
 
         # got to have this to work
@@ -1078,7 +1474,20 @@ class Configure(object):
 
         return rv
 
+
     def check_func_vfork(self):
+        """Inspect the system for unix `vfork` function.
+
+        Args:
+            None.
+
+        Returns:
+            boolean:  True if available.
+
+        Notes:
+            Emulates AC_FUNC_VFORK
+
+        """
         # setup the defs
         self.check_header('vfork.h')
 
@@ -1088,11 +1497,34 @@ class Configure(object):
     #AC_PROG_GCC_TRADITIONAL
 
     def check_func_stat(self):
-        """Emulate AC_FUNC_STAT"""
+        """Check for the availability of `stat()`
+
+        Args:
+            None
+
+        Returns:
+            Boolean:  True if available
+
+        Notes:
+            Emulate AC_FUNC_STAT
+
+        """
         self.check_header('sys/stat.h')
         return self.check_lib('stat')
 
     def check_func_lstat(self):
+        """Check for the availability of `lstat()`
+
+        Args:
+            None
+
+        Returns:
+            Boolean:  True if available
+
+        Notes:
+            Emulate AC_FUNC_LSTAT
+
+        """
         # do we have it
         ok = self.check_lib('lstat')
         if not ok:
@@ -1145,7 +1577,20 @@ class Configure(object):
         self.check_msg_result('yes')
         return True
 
+
     def check_getpw_r__posix(self):
+        """Check if `getpw*_R()` routines are POSIX-like.
+
+        Args:
+            None
+
+        Returns:
+            Boolean:  True if available
+
+        Notes:
+            Emulates AC_FUNC_GETPW_R_POSIX
+
+        """
         self.check_msg('getpw*_r are posix like')
 
         ok = self._check_compile(
@@ -1164,7 +1609,20 @@ class Configure(object):
         self.add_macro('HAVE_GETPW_R_POSIX', 1)
         return True
 
+
     def check_getpw_r__draft(self):
+        """Check if `getpw*_R()` routines are POSIX-draft-like.
+
+        Args:
+            None
+
+        Returns:
+            Boolean:  True if available
+
+        Notes:
+            Emulates AC_FUNC_GETPW_R_DRAFT
+
+        """
         self.check_msg('getpw*_r are draft like')
 
         ok = self._check_compile(
