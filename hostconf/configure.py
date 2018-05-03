@@ -4,6 +4,7 @@ Tools for emulating autoconf's inspection abilities in pure (ok, almost) python.
 
 """
 
+import sys
 import os
 import sysconfig
 import tempfile
@@ -36,13 +37,6 @@ class Configure(object):
 
     """
 
-    cache = {}
-    config = {}
-    macros = []  # list of tuples (MACRO, value)
-    includes = []
-    include_dirs = []
-    libraries = []
-
     def __init__(self,
                  name='hostconf',
                  compiler=None,
@@ -51,9 +45,19 @@ class Configure(object):
                  dry_run=0,
                  debug=False):
 
+        # basic catalogues
+        self.cache = {}
+        self.config = {}
+        self.macros = []  # list of tuples (MACRO, value)
+        self.includes = []
+        self.include_dirs = []
+        self.libraries = []
+
+        # manage arguments
         self.name = name
         self.debug = debug
         self.log = None
+        self.ostream = sys.stdout
 
         if tmpdir is None:
             self.tdir = tempfile.mkdtemp(prefix=name + '_')
@@ -99,17 +103,17 @@ class Configure(object):
 
         """
         ppt = PrettyPrinter(indent=4)
-        print("Configure.config:")
+        print("Configure.config:", file=self.ostream)
         ppt.pprint(self.config)
-        print("Configure.cache:")
+        print("Configure.cache:", file=self.ostream)
         ppt.pprint(self.cache)
-        print("Configure.macros:")
+        print("Configure.macros:", file=self.ostream)
         ppt.pprint(self.macros)
-        print("Configure.includes:")
+        print("Configure.includes:", file=self.ostream)
         ppt.pprint(self.includes)
-        print("Configure.include_dirs:")
+        print("Configure.include_dirs:", file=self.ostream)
         ppt.pprint(self.include_dirs)
-        print("Configure.libraries:")
+        print("Configure.libraries:", file=self.ostream)
         ppt.pprint(self.libraries)
 
 
@@ -181,7 +185,8 @@ class Configure(object):
 
         """
 
-        print("Creating {} from {} ...".format(config_h, config_h_in))
+        print("Creating {} from {} ...".format(config_h, config_h_in),
+              file=self.ostream)
 
         # grab the files
         fdin = open(config_h_in, 'r')
@@ -418,7 +423,7 @@ class Configure(object):
         self.log.write('#' * len(msg) + os.linesep)
 
         # print to the terminal without a line ending
-        print(msg, end='')
+        print(msg, end='', file=self.ostream)
 
 
     def check_msg_result(self, msg):
@@ -437,7 +442,7 @@ class Configure(object):
         self.log.write(logmsg + os.linesep)
         self.log.write('#' * 60 + os.linesep * 2)
 
-        print(msg)
+        print(msg, file=self.ostream)
 
 
     def add_macro(self, macro, macro_value, config_value=None, quoted=False):
@@ -772,7 +777,8 @@ class Configure(object):
                      includes=None,
                      include_dirs=None,
                      macros=None,
-                     pre_main=None):
+                     pre_main=None,
+                     add_config=False):
         """Check for the presence and usability of a set of headers.
 
         Args:
@@ -781,10 +787,11 @@ class Configure(object):
             include_dirs:  directories to add to the build path
             macros:     extra macros to define
             pre_main:   lines of code to place before main()
+            add_to_catalogue:  optional - add to defaults
 
         Returns:
-            listof booleans -- True indicates the the successful inspection
-                               of that particular header file.
+            boolean -- True indicates the the successful inspection
+                       of that particular header file.
 
         Notes:
             Equivalent to AC_CHECK_HEADER
@@ -824,7 +831,8 @@ class Configure(object):
 
         # create the conftest file
         fname = self._conftest_file(
-            header=header, includes=includes, macros=macros, pre_main=pre_main)
+            header=header, includes=includes, macros=macros,
+            pre_main=pre_main, add_config=add_config)
 
         # try to compile it
         try:
@@ -948,7 +956,7 @@ class Configure(object):
                 #output_dir=os.path.dirname(fname)
             )
         except CompileError:
-            print('no')
+            print('no', file=self.ostream)
             return False
 
         # link it
@@ -1245,7 +1253,8 @@ class Configure(object):
         ]
 
         # bail if we don't even have the type
-        ok = self.check_type(type_name, includes=includes)
+        ok = self.check_type(
+            type_name, includes=includes, include_dirs=include_dirs)
         if not ok:
             return False
 
