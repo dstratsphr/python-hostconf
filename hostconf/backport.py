@@ -1,5 +1,5 @@
 """
-Backport infrastructure to ensure older situations work correcly.
+Backport infrastructure to ensure older situations work correctly.
 
 It turns out that older subprocess modules did not have the 'run'
 function.  So, in effect, this is a backport of the run routine

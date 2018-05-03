@@ -9,6 +9,22 @@ hostconf.configure module
     :undoc-members:
     :show-inheritance:
 
+hostconf.backport module
+------------------------
+
+.. automodule:: hostconf.backport
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+hostconf.config_errors module
+-----------------------------
+
+.. automodule:: hostconf.config_errors
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 
 Module contents
 ---------------

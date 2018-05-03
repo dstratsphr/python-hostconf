@@ -999,10 +999,8 @@ class Configure(object):
             library_dirs: optional directories to add to the linker path
 
         Returns:
-            list of libs -- The list of libraries needed to link the
-                            function and lib.
-                         -- Can return `None` in the case that it cannot
-                            be linked at all.
+            list of libs - libraries needed to link the function and lib.
+                         - May return `None` when all linking fails
 
         Notes:
             This has no specific autoconf counterpart.
