@@ -2,7 +2,7 @@
  Track versioning.
 """
 
-VERSION_INFO = [0, 1, 2]
+VERSION_INFO = [0, 2, 0]
 
 def version():
     """Return the version number of this module.

@@ -1,2 +1,4 @@
 include hostconf/*.py
+include hostconf/tests/include/*.h
+include hostconf/tests/include/veg/*.h
 include setup.py CHANGES LICENSE README
